@@ -1,0 +1,9 @@
+{
+  "_comment": "Replace <MLFORGE_DIR> with the absolute path to your checkout of this directory.",
+  "mcpServers": {
+    "mlforge": {
+      "command": "<MLFORGE_DIR>/.venv/bin/python",
+      "args": ["<MLFORGE_DIR>/server.py"]
+    }
+  }
+}

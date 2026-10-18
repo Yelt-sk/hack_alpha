@@ -1,0 +1,14 @@
+# Local environment -- machine-specific, never committed
+.venv/
+__pycache__/
+*.py[cod]
+
+# Agent run artifacts: contain absolute local paths and large binaries
+workspace/
+*.joblib
+*.log
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store

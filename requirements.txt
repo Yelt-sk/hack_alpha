@@ -1,0 +1,12 @@
+# Core runtime for the MLForge MCP server.
+# openai is only needed by scripts/run_agent.py (the LLM loop).
+numpy>=2.5.4
+pandas>=3.0.6
+scipy>=1.18.1
+scikit-learn>=1.9.1
+lightgbm>=4.7.0
+catboost>=1.2.10
+optuna>=5.0.0
+mcp>=2.3.0
+joblib>=1.6.0
+openai>=3.33.0
