@@ -197,11 +197,20 @@ def run_recipe(recipe: dict, note: str = "") -> dict[str, Any]:
             )
             payload["next_step"] = "Choose one item from untried_moves and call run_recipe with it."
         else:
-            payload["hint"] = "Re-running it cannot teach you anything. Change exactly one thing."
+            # Deliberately not "change one thing": taken literally against a
+            # two-recipe history, that instruction walks straight into the other
+            # one. Point at what has not been tried instead.
+            payload["hint"] = (
+                "Re-running a scored experiment teaches you nothing. Take one of untried_moves."
+            )
             payload["next_step"] = current.ledger.verdict(previous)
         return payload
 
-    if spec.id_column not in (normalised["drop_columns"] or []):
+    if spec.id_column not in (normalised["drop_columns"] or []) and not current.warned_about_id:
+        # Once, not every run. Repeated on every call it became half of a
+        # two-state loop: this warning pushed the id out, and "change exactly one
+        # thing" pushed it back in.
+        current.warned_about_id = True
         warnings.append(
             f"'{spec.id_column}' is the row identifier and is still a feature; "
             f"add it to drop_columns unless you have a reason to keep it"

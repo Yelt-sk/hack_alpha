@@ -29,6 +29,8 @@ class Session:
     regime_rationale: str = ""
     #: How many times an already-scored experiment has been resubmitted.
     duplicates: int = 0
+    #: Advice that is true of the data rather than of a run is said once.
+    warned_about_id: bool = False
     events: list[str] = field(default_factory=list)
 
     def note(self, message: str) -> None:

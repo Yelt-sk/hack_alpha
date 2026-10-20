@@ -67,7 +67,15 @@ def main() -> int:
     # Rung one, before anything that can fail.
     bootstrap.floor(session, log)
 
+    finalised = threading.Event()
+
     def finalise(*_: object) -> None:
+        # Reachable from the signal handler and from the normal exit path, and a
+        # SIGTERM during shutdown runs both. Doing the work once keeps the log
+        # honest and avoids rewriting a file while it is being replaced.
+        if finalised.is_set():
+            return
+        finalised.set()
         if not session.submissions.exists():
             session.submissions.save_constant(session.store.y)
         log(f"[solution] final: {session.submissions.describe()}")
