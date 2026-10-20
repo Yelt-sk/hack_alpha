@@ -180,6 +180,36 @@ The case data is not committed. Unpack the provided archive into `data/` to get
 
 ---
 
+## What a live run showed
+
+Driven by a local **Qwen3-1.7B** (llama.cpp, 16k context) on the regression task.
+Far weaker than the Qwen3-27B the platform provides, which is the point: it
+stresses the tool surface rather than the modelling.
+
+The first attempt died at step 4 — the window overflowed and the loop gave up
+with thirteen minutes unused. Three fixes came out of that, each of which
+applies to any model:
+
+* **Budget the whole request, not the recent history.** The system prompt and
+  tool schemas are most of it. Dense JSON also tokenises at roughly three
+  characters per token, not four — optimism there is what overflowed a 16k
+  window. An overflow now shrinks the history and retries instead of ending.
+* **A refusal needs a correction attached.** Told only which keys were legal,
+  the model resubmitted the same invented recipe three times. Given back a
+  repaired recipe it could resend verbatim, it recovered on the next call.
+* **Leftover time belongs to the autopilot.** Whatever ends the agent, the
+  remaining minutes still buy experiments, and a worse result is refused anyway.
+
+After the fixes it ran the full 25 steps, and its last action — `tune_recipe` —
+produced the best result of the run: **RMSE 42.71** against the automatic floor
+of 42.80.
+
+It also showed the limit of a 1.7B: from step 11 it oscillated between two
+recipes it had already run, fourteen times. The ledger refused every repeat, so
+nothing was corrupted and no time was wasted on refits, but a bare "you already
+ran this" reads to a weak model as "try the adjacent one". A duplicate refusal
+now escalates and names the untried axes instead.
+
 ## Measured on this hardware
 
 Eight cores, no GPU — the same shape as the grading container.

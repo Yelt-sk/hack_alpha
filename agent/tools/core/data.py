@@ -10,7 +10,7 @@ from ..registry import tool
 
 
 @tool
-def profile_data(max_columns: int = 60) -> dict[str, Any]:
+def profile_data(max_columns: int = 25) -> dict[str, Any]:
     """Describe the data and list its quality problems in one call.
 
     Returns shapes, per-column types, missing rates, cardinality, target
@@ -22,10 +22,25 @@ def profile_data(max_columns: int = 60) -> dict[str, Any]:
     costs roughly ten steps and tells you no more.
 
     Args:
-        max_columns: Cap on how many columns are described individually.
+        max_columns: How many columns to describe individually. Raise it only if
+            you need the rest; the per-column block dominates the reply, and on a
+            wide table it can crowd out your own working context.
     """
     current = session()
     spec, store = current.spec, current.store
+
+    # The profile is deterministic, so a second identical call returns nothing
+    # new -- it only spends the context the agent still needs. Observed live: a
+    # model re-profiled at step 4 and overflowed its window one step later.
+    cached = getattr(current, "_profile_cache", None)
+    if cached is not None and cached[0] == max_columns:
+        return {
+            "status": "unchanged",
+            "note": "You already profiled this data; nothing about it has changed.",
+            "findings": cached[1]["findings"],
+            "hint": "Use inspect_columns for specific columns, or get_context for the run state.",
+        }
+
     report = profiling.profile(
         store.train, store.test, spec.target_column, spec.id_column, spec.kind, max_columns
     )
@@ -35,6 +50,12 @@ def profile_data(max_columns: int = 60) -> dict[str, Any]:
     report["dictionary_available"] = store.dictionary is not None
     if store.dtype_fixes:
         report["dtype_reconciliation"] = store.dtype_fixes
+    if report.get("columns_truncated"):
+        report["note"] = (
+            f"Only {max_columns} of {len(store.X.columns)} columns are described here. "
+            f"Use inspect_columns for any others you care about."
+        )
+    current._profile_cache = (max_columns, report)
     return report
 
 

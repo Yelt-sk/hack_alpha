@@ -216,6 +216,20 @@ def repair(recipe: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
             out["model"]["params"] = merged
             notes.append(f'moved top-level "{key}" into model.params')
 
+    if "note" in out and "notes" not in out:
+        out["notes"] = out.pop("note")
+        notes.append('renamed "note" to "notes"')
+
+    # A list such as ["drop_columns", "scale_numeric", "encode_categorical"] names
+    # stages rather than configuring them. There is nothing to salvage, but saying
+    # where those settings actually live is worth more than listing legal keys.
+    if isinstance(out.get("preprocessing"), list):
+        out.pop("preprocessing")
+        notes.append(
+            'dropped "preprocessing": preprocessing is configured through the '
+            '"numeric", "categorical", "drop_columns" and "features" fields, not as a list of stages'
+        )
+
     hoisted = {k: out.pop(k) for k in list(out) if k in _HOISTED}
     if hoisted:
         params = dict(out["model"].get("params") or {})

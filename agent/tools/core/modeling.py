@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -86,6 +87,41 @@ def _finish(experiment: Experiment, result: dict[str, Any], warnings: list[str])
     return payload
 
 
+def _untried(current) -> dict[str, Any]:
+    """What has not been tried yet, as concrete next moves.
+
+    A bare "you already ran this" is read by a weak model as "try the adjacent
+    one", and it oscillates. Observed live: fourteen consecutive duplicates
+    alternating between two recipes. Naming the unexplored axes turns the
+    refusal into a direction.
+    """
+    spec = current.spec
+    recipes = [e.detail["recipe"] for e in current.ledger.entries if e.detail.get("recipe")]
+
+    tried_models = {r["model"]["type"] for r in recipes}
+    tried_encoders = {r["categorical"]["encode"] for r in recipes}
+    usable = [m for m, meta in recipe_schema.MODELS.items()
+              if spec.kind in meta["tasks"] and m not in tried_models and m != "dummy"]
+
+    moves: list[str] = []
+    if usable:
+        moves.append(f'a different model: "model": {{"type": "{usable[0]}"}} '
+                     f"(untried: {sorted(usable)})")
+    untried_encoders = [e for e in recipe_schema.CAT_ENCODE if e not in tried_encoders]
+    if untried_encoders:
+        moves.append(f'a different encoder: "categorical": {{"encode": "{untried_encoders[0]}"}}')
+    if not any(r["features"] for r in recipes):
+        moves.append('engineered features, e.g. "features": [{"op": "missing_count", "name": "n_missing"}]')
+    if spec.kind == "regression" and not any(r["target_transform"] != "none" for r in recipes):
+        moves.append('a target transform: "target_transform": "log1p"')
+    if spec.is_classification and not any(r["class_weight"] != "none" for r in recipes):
+        moves.append('"class_weight": "balanced"')
+    if not any(e.name.endswith("_tuned") for e in current.ledger.entries):
+        moves.append("tune_recipe on the best recipe so far")
+
+    return {"tried_models": sorted(tried_models), "untried_moves": moves[:4]}
+
+
 @tool
 def get_recipe_schema() -> dict[str, Any]:
     """The full recipe vocabulary: every field, every allowed value, the model list, examples.
@@ -119,8 +155,51 @@ def run_recipe(recipe: dict, note: str = "") -> dict[str, Any]:
         recipe, spec.kind, list(store.X.columns)
     )
     if errors:
-        return {"status": "invalid_recipe", "errors": errors, "warnings": warnings,
-                "hint": "Fix every error above and resubmit. Call get_recipe_schema if unsure."}
+        payload: dict[str, Any] = {
+            "status": "invalid_recipe", "errors": errors, "warnings": warnings,
+            "hint": "Call get_recipe_schema if the shape is unclear.",
+        }
+        # Offer something the model can send back verbatim. Naming the problem is
+        # not enough: observed live, a model given only the list of legal keys
+        # resubmitted the same invented shape three times in a row.
+        candidate = {k: v for k, v in normalised.items() if k in recipe_schema.DEFAULT_RECIPE}
+        _, residual, _ = recipe_schema.validate(candidate, spec.kind, list(store.X.columns))
+        if not residual:
+            payload["corrected_recipe"] = candidate
+            payload["next_step"] = "Call run_recipe again with corrected_recipe exactly as given."
+        else:
+            payload["minimal_example"] = {"name": "lgbm", "drop_columns": [spec.id_column],
+                                          "model": {"type": "lightgbm"}}
+        return payload
+
+    fingerprint = json.dumps(
+        {k: v for k, v in normalised.items() if k not in ("name", "notes")},
+        sort_keys=True, default=str,
+    )
+    previous = next(
+        (e for e in current.ledger.entries if e.detail.get("fingerprint") == fingerprint), None
+    )
+    if previous is not None:
+        current.duplicates += 1
+        payload = {
+            "status": "duplicate",
+            "problem": f"this is the same experiment as {previous.id} (only the name differs), "
+                       f"already scored {spec.metric}={previous.score:.6f}",
+            "existing": previous.row(),
+            **_untried(current),
+        }
+        if current.duplicates >= 3:
+            # Repeating the same refusal has not worked; be directive instead.
+            payload["hint"] = (
+                f"You have now resubmitted an already-scored experiment {current.duplicates} times. "
+                f"Alternating between two recipes you have both already run is not a search. "
+                f"Pick one untried move from the list and send it."
+            )
+            payload["next_step"] = "Choose one item from untried_moves and call run_recipe with it."
+        else:
+            payload["hint"] = "Re-running it cannot teach you anything. Change exactly one thing."
+            payload["next_step"] = current.ledger.verdict(previous)
+        return payload
 
     if spec.id_column not in (normalised["drop_columns"] or []):
         warnings.append(
@@ -144,6 +223,7 @@ def run_recipe(recipe: dict, note: str = "") -> dict[str, Any]:
     detail = {
         "all_metrics": report(spec.kind, store.y, result["oof"], result["oof_proba"], result["classes"]),
         "recipe": normalised,
+        "fingerprint": fingerprint,
     }
     experiment = _register(
         normalised["name"], "recipe", primary,

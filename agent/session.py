@@ -27,6 +27,8 @@ class Session:
     #: Declared by the agent early; filters which tools are offered.
     regime: str = "standard"
     regime_rationale: str = ""
+    #: How many times an already-scored experiment has been resubmitted.
+    duplicates: int = 0
     events: list[str] = field(default_factory=list)
 
     def note(self, message: str) -> None:

@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 warnings.filterwarnings("ignore")
 
 from agent import autopilot, bootstrap, session as session_module  # noqa: E402
+from agent import rag as _rag_seam  # noqa: E402,F401  (registers search_knowledge)
 from agent.tools import core as _core_tools  # noqa: E402,F401  (registers the tools)
 from agent.tools.mods import load_all as load_mods  # noqa: E402
 
@@ -82,13 +83,21 @@ def main() -> int:
 
             try:
                 outcome = loop.run(session, max_steps=MAX_STEPS, log=log)
-                log(f"[solution] agent finished after {outcome['steps']} steps")
+                log(f"[solution] agent stopped after {outcome['steps']} steps "
+                    f"({outcome['stopped']})")
                 if outcome["final_message"]:
                     log(f"[solution] agent report:\n{outcome['final_message'][:3000]}")
             except Exception as err:  # noqa: BLE001
                 log(f"[solution] the agent loop failed: {type(err).__name__}: {err}")
                 traceback.print_exc()
-                log("[solution] falling back to the deterministic pipeline")
+
+            # Whatever ended the agent -- finishing early, running out of steps,
+            # a dead endpoint -- the remaining minutes are still worth spending.
+            # The autopilot can only improve the answer: a worse result is refused
+            # by the submission manager, so this is free insurance.
+            if session.clock.usable_remaining > 120:
+                log(f"[solution] {session.clock.usable_remaining / 60:.1f} min left; "
+                    f"continuing with the deterministic pipeline")
                 autopilot.run(session, log)
         else:
             log("[solution] no model configured; running the deterministic pipeline")
