@@ -22,7 +22,11 @@ from typing import Any
 #: Cap on worker threads. Cross-validation already iterates folds, so letting a
 #: booster claim every core oversubscribes them. Measured on an 8-core machine,
 #: n_jobs=-1 turned a 2-second fit into 47 seconds for an identical score.
-N_JOBS: int = max(1, min(4, (os.cpu_count() or 4) // 2))
+#:
+#: Overridable because the development machine also runs the inference server:
+#: four training threads beside four generation threads on eight cores starves
+#: both. The grading container has no such neighbour and can use the default.
+N_JOBS: int = int(os.environ.get("AGENT_N_JOBS", 0)) or max(1, min(4, (os.cpu_count() or 4) // 2))
 
 NUM_IMPUTE = ["median", "mean", "constant", "none"]
 NUM_SCALE = ["none", "standard", "robust", "minmax"]

@@ -343,7 +343,11 @@ def build_estimator(recipe: dict, kind: str, time_budget_s: float | None = None)
         return (CatBoostClf if classification else CatBoostReg)(params=params)
 
     if model_type == "flaml":
-        budget = recipe.get("time_budget_s") or time_budget_s or 300
+        # time_budget_s is already per fold: the caller divided the experiment's
+        # total by the fold count. Reading the recipe field directly here would
+        # multiply it back up -- an agent asking for ten minutes would spend
+        # fifty, which is most of an hour out of a three-hour run.
+        budget = time_budget_s or 300
         cls = FlamlClf if classification else FlamlReg
         return cls(params=params, time_budget_s=int(budget))
 
@@ -457,7 +461,11 @@ def evaluate(
     fold_seconds: list[float] = []
     warnings: list[str] = []
 
-    budget_per_fold = (time_budget_s / store.n_splits) if time_budget_s else None
+    # A recipe's own budget is the cost of the whole experiment, so the folds
+    # share it. An explicit budget wins over the caller's share of the clock.
+    declared = recipe.get("time_budget_s")
+    total_budget = declared if declared else time_budget_s
+    budget_per_fold = (total_budget / store.n_splits) if total_budget else None
 
     for fold, (train_idx, val_idx) in enumerate(store.splits()):
         started = time.perf_counter()
