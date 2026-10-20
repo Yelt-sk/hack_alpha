@@ -1,3 +1,206 @@
-ntntntntnntnt
-qwertyuwaewiqeoqwe
-wfsdfsvxcvxcvzbvxcb
+# AutoML agent — tool space
+
+An AI agent that reads an ML task, investigates the data, runs experiments and
+leaves a file of predictions. Built for the Alfa hackathon track *«AI-агент для
+разработки ML-моделей»*.
+
+This repository is the **substrate**: the tool space the agent acts through, the
+guarantees around it, and the gateway for hanging further work on it. Retrieval
+is developed separately and plugs in through a fixed seam.
+
+---
+
+## The two facts that shaped the design
+
+**There is no MCP in the container.** `baseline.py` demonstrates the idea with
+`FastMCP`, but the organisers confirmed the package is not installed: the
+submission script offers tools to the model and executes the chosen action
+itself. So the tool layer is in-process. The contracts stay MCP-shaped — `name`,
+`description`, `parameters` is exactly what an MCP server advertises — so the
+same registry can be served over real MCP for local debugging.
+
+**The expensive failure is zero, not a weak model.** Three hours with a hard
+kill, and `S = 100·max(0, 1 − RMSE/B_RMSE)`: no file, a malformed file, or a
+result at baseline level all score nothing. So a valid submission exists from the
+first seconds of the run and is only ever replaced by something that validates
+and scores better.
+
+---
+
+## How a run goes
+
+```
+solution.py task.md
+  ├── read the task           derive paths, target, kind, metric — nothing hard-coded
+  ├── load data, fix folds    one fold assignment reused by every experiment
+  ├── rung 1: constant        a valid submission exists within seconds
+  ├── rung 2: default LGBM    a real floor within minutes
+  ├── watchdog thread         writes the best known answer if time runs out
+  └── the agent               improves on the floor, or the autopilot does
+```
+
+If `OPENAI_API_KEY` and `OPENAI_MODEL` are absent, or the loop fails, the run
+falls through to a deterministic pipeline instead of to nothing.
+
+---
+
+## The tool space
+
+Twelve tools. The vocabulary is wide — the model driving this is capable — but
+the things that are expensive to get wrong are not left to it.
+
+| Tool | What it is for |
+|---|---|
+| `get_context` | task, metric, time left, best so far, saved submission |
+| `set_strategy` | declare the regime: recipes, or your own code |
+| `profile_data` | shapes, types, missing rates, and quality findings with actions |
+| `inspect_columns` | distribution, dictionary description, single-feature power |
+| `get_recipe_schema` | the recipe vocabulary and worked examples |
+| `run_recipe` | compile, cross-validate honestly, score, record, save if best |
+| `tune_recipe` | Optuna on the same folds, inside a budget it actually honours |
+| `evaluate_predictions` | score your own predictions on the run's folds |
+| `run_python` | arbitrary code in a subprocess, with the data pre-cached |
+| `leaderboard` | every attempt, ranked, with the fold-noise band |
+| `save_submission` | validate and write the answer |
+| `search_knowledge` | the retrieval seam (no-op until the retriever is installed) |
+
+### Hybrid by default
+
+Recipes are the fast path: the agent decides *what to try*, proven algorithms do
+the work. `run_python` stays available for anything a recipe cannot express,
+which matters because two of the four graded tasks are never shown to us.
+
+`evaluate_predictions` is what makes the hybrid one system rather than two. It
+scores hand-written predictions on the same folds as recipes, so the leaderboard
+can compare them. Without it the two regimes produce incomparable numbers.
+
+---
+
+## What the agent cannot do
+
+* **Choose its own validation split.** Folds belong to the run, not to a recipe.
+* **Leak across folds.** Imputers, encoders, rare-category lists and
+  winsorisation bounds all live inside the `Pipeline` and are refitted per fold.
+  There is no recipe field that would place them outside it.
+* **Break the answer.** Every write is validated against `test.csv` first —
+  exact columns, every id once, test order, no missing values, known labels —
+  and written atomically. A rejected file leaves the previous answer intact.
+* **Pass off a perfect score.** Results beyond a plausibility threshold are
+  flagged and never become the best until explained.
+* **Overrun the clock.** Work that cannot finish before the reserve is refused.
+
+---
+
+## Experimental mods
+
+Drop a module in `agent/tools/mods/` and it becomes a tool:
+
+```python
+from ...session import session
+from ..registry import tool
+
+@tool(experimental=True)
+def my_idea(window: int = 3) -> dict:
+    """One line the model will read as the tool description.
+
+    Args:
+        window: What it controls.
+    """
+    ...
+```
+
+Discovered at startup; the signature becomes the JSON schema. A mod that raises
+at import or at call time is disabled and logged rather than allowed to end the
+run — an unfinished idea must not cost a submission.
+
+---
+
+## Retrieval seam
+
+Knowledge retrieval is built separately. Implement `search(query, top_k)` in
+`agent/rag_impl.py` returning `[{"title", "source", "relevance", "content"}]`
+and `search_knowledge` starts using it. Absent or failing, the tool says so and
+the run continues.
+
+Worth indexing: `task.md`, `data_dictionary.csv` (it carries `description_ru`
+per field), and a playbook covering when a recipe suffices and when the task
+needs hand-written code.
+
+---
+
+## Layout
+
+```
+solution.py                 entry point: ladder, watchdog, fallbacks
+agent/
+  task.py                   derive paths, target, kind, metric from the task files
+  state.py                  Clock, DataStore (data + shared folds), Ledger
+  submission.py             validation and atomic custody of submission.csv
+  metrics.py                one scoring path for every regime
+  profiling.py              profile and quality findings
+  guards.py                 plausibility check
+  prompt.py                 the system prompt
+  loop.py                   the agent loop
+  autopilot.py              deterministic pipeline, used when there is no model
+  bootstrap.py              the guarantee ladder
+  rag.py                    retrieval seam
+  recipes/
+    schema.py               vocabulary, repair, validation, model registry
+    pipeline.py             recipe -> leak-safe pipeline, cross-validated
+  tools/
+    registry.py             functions -> OpenAI tool schemas, and dispatch
+    core/                   the built-in tools
+    mods/                   experimental gateway
+tests/test_contracts.py     assertions on the guarantees above
+```
+
+---
+
+## Running it
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+
+# deterministic, no model needed
+AGENT_TOTAL_SECONDS=600 .venv/bin/python solution.py "data/Регрессия/task.md"
+
+# with a model
+OPENAI_API_KEY=... OPENAI_MODEL=... OPENAI_BASE_URL=... \
+  .venv/bin/python solution.py "data/Регрессия/task.md"
+
+.venv/bin/python tests/test_contracts.py
+```
+
+`AGENT_TOTAL_SECONDS`, `AGENT_RESERVE_SECONDS` and `AGENT_MAX_STEPS` override the
+defaults, which is how a three-hour run is rehearsed in ten minutes.
+
+The case data is not committed. Unpack the provided archive into `data/` to get
+`data/Регрессия/` and `data/Многоклассовая классификация/`.
+
+---
+
+## Measured on this hardware
+
+Eight cores, no GPU — the same shape as the grading container.
+
+| | regression (53k × 64) | multiclass (88k × 44) |
+|---|---|---|
+| load + cache | 2.3 s | 1.0 s |
+| 5-fold LightGBM | ~6 s | ~85 s |
+| bootstrap floor | RMSE 42.80 | — |
+
+`n_jobs=-1` is a trap here: cross-validation already iterates folds, so letting
+each booster claim every core oversubscribes them. Measured, an identical 5-fold
+LightGBM run took **47 s at `n_jobs=-1` and 2.2 s at `n_jobs=4`**, for the same
+score. Workers are capped at half the core count throughout.
+
+---
+
+## Open questions for the organisers
+
+* Exact launch command — `python solution.py task.md`, as in `baseline.py`?
+* Is there a step limit as well as the time limit? `baseline.py` hard-codes 100.
+* Token budget per run inside the container.
+* `baseline.py` runs `run_python` with `env={"PATH": os.defpath}`, so the API key
+  is not inherited by the subprocess. Deliberate, or an artefact of the example?

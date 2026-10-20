@@ -1,0 +1,93 @@
+"""Data understanding tools."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from ... import profiling
+from ...session import session
+from ..registry import tool
+
+
+@tool
+def profile_data(max_columns: int = 60) -> dict[str, Any]:
+    """Describe the data and list its quality problems in one call.
+
+    Returns shapes, per-column types, missing rates, cardinality, target
+    distribution, and findings such as target leakage, identifier columns,
+    constant columns, unseen test categories and class imbalance. Each finding
+    names the action to take.
+
+    Read this before your first experiment. Doing the same exploration by hand
+    costs roughly ten steps and tells you no more.
+
+    Args:
+        max_columns: Cap on how many columns are described individually.
+    """
+    current = session()
+    spec, store = current.spec, current.store
+    report = profiling.profile(
+        store.train, store.test, spec.target_column, spec.id_column, spec.kind, max_columns
+    )
+    report["findings"] = profiling.findings(
+        store.train, store.test, spec.target_column, spec.id_column, spec.kind
+    )
+    report["dictionary_available"] = store.dictionary is not None
+    if store.dtype_fixes:
+        report["dtype_reconciliation"] = store.dtype_fixes
+    return report
+
+
+@tool
+def inspect_columns(columns: list[str], top_k: int = 10) -> dict[str, Any]:
+    """Look closely at specific columns: distribution, missingness, link to the target.
+
+    Use it after `profile_data` when a column looks suspicious or promising, or to
+    read its description from the data dictionary.
+
+    Args:
+        columns: Column names to inspect.
+        top_k: How many frequent values to list for a categorical column.
+    """
+    current = session()
+    spec, store = current.spec, current.store
+    unknown = [c for c in columns if c not in store.train.columns]
+    if unknown:
+        return {"status": "error", "problem": f"unknown columns: {unknown}",
+                "hint": "See profile_data for the column list."}
+
+    descriptions: dict[str, str] = {}
+    if store.dictionary is not None and {"feature"}.issubset(store.dictionary.columns):
+        text_column = next(
+            (c for c in ("description_ru", "description") if c in store.dictionary.columns), None
+        )
+        if text_column:
+            descriptions = dict(zip(store.dictionary["feature"], store.dictionary[text_column]))
+
+    out: dict[str, Any] = {}
+    for name in columns:
+        series = store.train[name]
+        entry: dict[str, Any] = {
+            "dtype": str(series.dtype),
+            "missing_pct": round(float(series.isna().mean()) * 100, 2),
+            "n_unique": int(series.nunique(dropna=True)),
+            "predictive_power": round(
+                profiling._single_feature_power(series, store.y, spec.kind), 4
+            ),
+        }
+        if name in descriptions:
+            entry["description"] = str(descriptions[name])
+        if series.dtype.kind in "biufc":
+            entry["quantiles"] = {
+                str(q): round(float(series.quantile(q)), 4) for q in (0.01, 0.25, 0.5, 0.75, 0.99)
+            }
+        else:
+            entry["top_values"] = {
+                str(k): int(v) for k, v in series.astype(str).value_counts().head(top_k).items()
+            }
+            if name in store.test.columns:
+                entry["unseen_in_test"] = int(
+                    len(set(store.test[name].dropna().unique()) - set(series.dropna().unique()))
+                )
+        out[name] = entry
+    return out
