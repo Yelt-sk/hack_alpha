@@ -1,0 +1,19 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+from autogluon.tabular import TabularPredictor
+
+DATA_PATH = "data.csv"
+TARGET = "target"
+
+df = pd.read_csv(DATA_PATH).dropna(subset=[TARGET])
+train, valid = train_test_split(df, test_size=0.2, random_state=42)
+
+predictor = TabularPredictor(
+    label=TARGET,
+    problem_type="regression",
+    eval_metric="root_mean_squared_error",
+).fit(train_data=train, time_limit=600)
+
+pred = predictor.predict(valid.drop(columns=[TARGET]))
+print("RMSE:", mean_squared_error(valid[TARGET], pred) ** 0.5)

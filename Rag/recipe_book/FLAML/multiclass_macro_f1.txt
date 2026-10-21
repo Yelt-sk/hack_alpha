@@ -1,0 +1,23 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, accuracy_score
+from flaml import AutoML
+
+DATA_PATH = "data.csv"
+TARGET = "target"
+
+df = pd.read_csv(DATA_PATH).dropna(subset=[TARGET])
+X, y = df.drop(columns=[TARGET]), df[TARGET]
+X_train, X_valid, y_train, y_valid = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+automl = AutoML()
+automl.fit(
+    X_train=X_train, y_train=y_train,
+    task="classification", metric="macro_f1",
+    time_budget=600, seed=42, n_jobs=4,
+)
+pred = automl.predict(X_valid)
+print("Macro-F1:", f1_score(y_valid, pred, average="macro"))
+print("Accuracy:", accuracy_score(y_valid, pred))

@@ -1,0 +1,31 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, accuracy_score
+from lightautoml.automl.presets.tabular_presets import TabularAutoML
+from lightautoml.tasks import Task
+
+DATA_PATH = "data.csv"
+TARGET = "target"
+SEED = 42
+
+df = pd.read_csv(DATA_PATH).dropna(subset=[TARGET])
+train, valid = train_test_split(
+    df, test_size=0.2, random_state=SEED, stratify=df[TARGET]
+)
+
+automl = TabularAutoML(
+    task=Task("multiclass"),
+    timeout=600,
+    cpu_limit=4,
+    reader_params={"n_jobs": 4, "cv": 5, "random_state": SEED},
+)
+automl.fit_predict(train, roles={"target": TARGET}, verbose=1)
+
+scores = np.asarray(automl.predict(valid).data)
+# Проверяй порядок классов в соответствии с используемой версией LightAutoML.
+classes = list(automl.reader.class_mapping.keys())
+pred = [classes[i] for i in scores.argmax(axis=1)]
+
+print("Macro-F1:", f1_score(valid[TARGET], pred, average="macro"))
+print("Accuracy:", accuracy_score(valid[TARGET], pred))

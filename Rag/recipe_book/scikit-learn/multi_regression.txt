@@ -1,0 +1,42 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.metrics import mean_squared_error
+
+DATA_PATH = "data.csv"
+TARGETS = ["target_1", "target_2"]
+
+df = pd.read_csv(DATA_PATH).dropna(subset=TARGETS)
+X, Y = df.drop(columns=TARGETS), df[TARGETS]
+num = X.select_dtypes(include="number").columns
+cat = X.select_dtypes(exclude="number").columns
+
+pre = ColumnTransformer([
+    ("num", SimpleImputer(strategy="median"), num),
+    ("cat", Pipeline([
+        ("imputer", SimpleImputer(strategy="most_frequent")),
+        ("onehot", OneHotEncoder(handle_unknown="ignore")),
+    ]), cat),
+])
+base = RandomForestRegressor(
+    n_estimators=300, random_state=42, n_jobs=-1
+)
+model = Pipeline([
+    ("pre", pre),
+    ("model", MultiOutputRegressor(base)),
+])
+
+X_train, X_valid, Y_train, Y_valid = train_test_split(
+    X, Y, test_size=0.2, random_state=42
+)
+model.fit(X_train, Y_train)
+pred = model.predict(X_valid)
+
+for i, target in enumerate(TARGETS):
+    rmse = mean_squared_error(Y_valid.iloc[:, i], pred[:, i]) ** 0.5
+    print(f"{target} RMSE: {rmse:.6f}")

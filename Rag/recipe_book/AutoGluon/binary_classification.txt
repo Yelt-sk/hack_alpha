@@ -1,0 +1,26 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score, accuracy_score
+from autogluon.tabular import TabularPredictor
+
+DATA_PATH = "data.csv"
+TARGET = "target"
+
+df = pd.read_csv(DATA_PATH).dropna(subset=[TARGET])
+train, valid = train_test_split(
+    df, test_size=0.2, random_state=42, stratify=df[TARGET]
+)
+
+predictor = TabularPredictor(
+    label=TARGET,
+    problem_type="binary",
+    eval_metric="roc_auc",
+).fit(train_data=train, time_limit=600)
+
+X_valid = valid.drop(columns=[TARGET])
+proba = predictor.predict_proba(X_valid)
+positive_proba = proba[predictor.positive_class]
+pred = predictor.predict(X_valid)
+
+print("ROC AUC:", roc_auc_score(valid[TARGET], positive_proba))
+print("Accuracy:", accuracy_score(valid[TARGET], pred))

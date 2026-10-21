@@ -1,0 +1,13 @@
+ML recipes: 16 tabular machine-learning examples
+
+Before running a recipe:
+1. Install the library dependencies.
+2. Change DATA_PATH to your CSV file.
+3. Change TARGET or TARGETS to your target column names.
+4. Review the metric, split strategy, and time budget.
+5. Copy the .txt code into a .py file or run it in a notebook.
+
+
+Multi-target recipes fit one output per target, except LightAutoML,
+which uses MultiautogradSequence.
+These are templates:
