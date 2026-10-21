@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from sklearn import metrics as skm
 
-from .task import METRICS
+from agent_task import METRICS
 
 #: Metrics that need class probabilities rather than hard labels.
 PROBA_METRICS: frozenset[str] = frozenset({"roc_auc", "logloss"})

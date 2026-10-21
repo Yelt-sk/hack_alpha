@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from ... import profiling
-from ...session import session
-from ..registry import tool
+import agent_profiling as profiling
+from agent_session import session
+from agent_registry import tool
 
 
 @tool

@@ -9,14 +9,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ... import guards
-from ...metrics import report, score
-from ...recipes import schema as recipe_schema
-from ...recipes.pipeline import CompileError, evaluate
-from ...session import session
-from ...state import Experiment
-from ...submission import frame_from_predictions
-from ..registry import tool
+import agent_guards as guards
+from agent_metrics import report, score
+import agent_recipe_schema as recipe_schema
+from agent_recipe_pipeline import CompileError, evaluate
+from agent_session import session
+from agent_state import Experiment
+from agent_submission import frame_from_predictions
+from agent_registry import tool
 
 
 def _register(name: str, source: str, primary: float, fold_scores: list[float],

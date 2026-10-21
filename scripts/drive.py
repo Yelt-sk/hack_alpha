@@ -24,9 +24,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 warnings.filterwarnings("ignore")
 
-from agent import bootstrap, rag as _rag, session as session_module  # noqa: E402,F401
-from agent.tools import core as _core  # noqa: E402,F401
-from agent.tools.registry import REGISTRY  # noqa: E402
+import agent_bootstrap as bootstrap  # noqa: E402,F401
+import agent_rag as _rag  # noqa: E402,F401
+import agent_session as session_module  # noqa: E402,F401
+import agent_tools as _core  # noqa: E402,F401
+from agent_registry import REGISTRY  # noqa: E402
 
 #: Keys worth seeing at a glance; the rest is folded away.
 HIGHLIGHT = ("status", "experiment_id", "score", "fold_std", "verdict", "problem",

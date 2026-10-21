@@ -2,7 +2,8 @@
 
 The retriever itself is built separately. This module fixes the contract so both
 sides can be developed independently: implement :func:`search` in
-``agent/rag_impl.py`` with the same signature and it is picked up automatically.
+``rag_impl.py``, beside ``solution.py``, with the same signature and it is
+picked up automatically.
 
 If no implementation is present, or it raises, the tool reports that cleanly and
 the run continues -- retrieval is an advantage, not a dependency.
@@ -12,12 +13,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .tools.registry import tool
+from agent_registry import tool
 
 
 def _implementation():
     try:
-        from . import rag_impl  # type: ignore[attr-defined]
+        import rag_impl as rag_impl
     except ImportError:
         return None
     return getattr(rag_impl, "search", None)

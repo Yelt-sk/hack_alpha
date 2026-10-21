@@ -25,10 +25,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 warnings.filterwarnings("ignore")
 
-from agent import autopilot, bootstrap, session as session_module  # noqa: E402
-from agent import rag as _rag_seam  # noqa: E402,F401  (registers search_knowledge)
-from agent.tools import core as _core_tools  # noqa: E402,F401  (registers the tools)
-from agent.tools.mods import load_all as load_mods  # noqa: E402
+import agent_autopilot as autopilot  # noqa: E402
+import agent_bootstrap as bootstrap  # noqa: E402
+import agent_rag as _rag_seam  # noqa: E402,F401  (registers search_knowledge)
+import agent_session as session_module  # noqa: E402
+import agent_tools as _core_tools  # noqa: E402,F401  (registers the tools)
+from agent_mods import load_all as load_mods  # noqa: E402
 
 #: The platform allows three hours; stop early enough to write the answer calmly.
 TOTAL_SECONDS = float(os.environ.get("AGENT_TOTAL_SECONDS", 3 * 3600))
@@ -87,7 +89,7 @@ def main() -> int:
         bootstrap.baseline(session, log)
 
         if os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENAI_MODEL"):
-            from agent import loop
+            import agent_loop as loop
 
             try:
                 outcome = loop.run(session, max_steps=MAX_STEPS, log=log)

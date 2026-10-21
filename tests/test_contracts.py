@@ -53,7 +53,7 @@ HAVE_DATA = REG.is_file() and CLS.is_file()
 print("\nTool registry")
 # ---------------------------------------------------------------------------
 
-from agent.tools.registry import Registry, ToolError  # noqa: E402
+from agent_registry import Registry, ToolError  # noqa: E402
 
 
 def _fresh_registry() -> Registry:
@@ -149,7 +149,7 @@ def _():
 print("\nRecipe vocabulary")
 # ---------------------------------------------------------------------------
 
-from agent.recipes.schema import repair, validate  # noqa: E402
+from agent_recipe_schema import repair, validate  # noqa: E402
 
 
 @check("a flattened recipe is repaired and the repair is reported")
@@ -199,7 +199,7 @@ def _():
 print("\nPlausibility guard")
 # ---------------------------------------------------------------------------
 
-from agent.guards import implausible  # noqa: E402
+from agent_guards import implausible  # noqa: E402
 
 
 @check("a perfect score is flagged and an ordinary one is not")
@@ -214,7 +214,7 @@ def _():
 print("\nLedger")
 # ---------------------------------------------------------------------------
 
-from agent.state import Clock, Experiment, Ledger  # noqa: E402
+from agent_state import Clock, Experiment, Ledger  # noqa: E402
 
 
 def _experiment(identifier: str, value: float, folds: list[float]) -> Experiment:
@@ -260,7 +260,7 @@ print("\nTask understanding" + ("" if HAVE_DATA else " (skipped: no data/)"))
 # ---------------------------------------------------------------------------
 
 if HAVE_DATA:
-    from agent.task import load_task  # noqa: E402
+    from agent_task import load_task  # noqa: E402
 
     @check("the regression task is read correctly")
     def _():
@@ -292,7 +292,7 @@ print("\nSubmission custody" + ("" if HAVE_DATA else " (skipped: no data/)"))
 # ---------------------------------------------------------------------------
 
 if HAVE_DATA:
-    from agent.submission import SubmissionManager, frame_from_predictions  # noqa: E402
+    from agent_submission import SubmissionManager, frame_from_predictions  # noqa: E402
 
     def _manager():
         spec = load_task(CLS)
@@ -359,7 +359,7 @@ print("\nFold safety" + ("" if HAVE_DATA else " (skipped: no data/)"))
 # ---------------------------------------------------------------------------
 
 if HAVE_DATA:
-    from agent.recipes.pipeline import compile_pipeline  # noqa: E402
+    from agent_recipe_pipeline import compile_pipeline  # noqa: E402
 
     @check("every fitted transform sits inside the pipeline, so folds refit it")
     def _():
@@ -385,7 +385,7 @@ if HAVE_DATA:
 
     @check("folds are identical for every experiment in a run")
     def _():
-        from agent.state import DataStore
+        from agent_state import DataStore
 
         spec = load_task(REG)
         cache = ROOT / ".test_cache"

@@ -6,8 +6,8 @@ from typing import Any
 
 import pandas as pd
 
-from ...session import session
-from ..registry import tool
+from agent_session import session
+from agent_registry import tool
 
 
 @tool

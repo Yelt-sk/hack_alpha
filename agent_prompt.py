@@ -7,7 +7,7 @@ Everything a tool can explain about itself is left to the tool.
 
 from __future__ import annotations
 
-from .session import Session
+from agent_session import Session
 
 SYSTEM = """\
 You are an ML engineer. You have one task, a fixed time budget, and a set of tools.

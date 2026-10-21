@@ -18,3 +18,6 @@ submission.csv
 .vscode/
 .idea/
 .DS_Store
+
+# Built archive
+submission.zip

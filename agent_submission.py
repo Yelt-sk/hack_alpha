@@ -20,8 +20,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .metrics import is_better
-from .task import TaskSpec
+from agent_metrics import is_better
+from agent_task import TaskSpec
 
 
 @dataclass

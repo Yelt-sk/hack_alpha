@@ -27,7 +27,7 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from .task import TaskSpec
+from agent_task import TaskSpec
 
 Phase = Literal["bootstrap", "explore", "exploit", "finalize"]
 

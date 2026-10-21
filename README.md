@@ -93,11 +93,12 @@ can compare them. Without it the two regimes produce incomparable numbers.
 
 ## Experimental mods
 
-Drop a module in `agent/tools/mods/` and it becomes a tool:
+Drop a `mod_*.py` beside `solution.py` and it becomes a tool:
 
 ```python
-from ...session import session
-from ..registry import tool
+# mod_my_idea.py
+from agent_session import session
+from agent_registry import tool
 
 @tool(experimental=True)
 def my_idea(window: int = 3) -> dict:
@@ -109,16 +110,20 @@ def my_idea(window: int = 3) -> dict:
     ...
 ```
 
-Discovered at startup; the signature becomes the JSON schema. A mod that raises
-at import or at call time is disabled and logged rather than allowed to end the
-run — an unfinished idea must not cost a submission.
+Discovered at startup by filename prefix; the signature becomes the JSON schema.
+A mod that raises at import or at call time is disabled and logged rather than
+allowed to end the run — an unfinished idea must not cost a submission.
+
+The prefix, rather than a folder, is what makes this work on the platform: only
+root files are copied next to the task, so a mod in a subfolder would be left
+behind.
 
 ---
 
 ## Retrieval seam
 
 Knowledge retrieval is built separately. Implement `search(query, top_k)` in
-`agent/rag_impl.py` returning `[{"title", "source", "relevance", "content"}]`
+`rag_impl.py`, in the archive root beside `solution.py`, returning `[{"title", "source", "relevance", "content"}]`
 and `search_knowledge` starts using it. Absent or failing, the tool says so and
 the run continues.
 
@@ -130,29 +135,49 @@ needs hand-written code.
 
 ## Layout
 
+Everything that runs lives in the archive root. This is not a style choice:
+the platform copies **only the root `.py` files and `requirements.txt`** into the
+task directory, so a module in a subfolder is simply absent at grading time. The
+names keep the hierarchy readable instead.
+
 ```
 solution.py                 entry point: ladder, watchdog, fallbacks
-agent/
-  task.py                   derive paths, target, kind, metric from the task files
-  state.py                  Clock, DataStore (data + shared folds), Ledger
-  submission.py             validation and atomic custody of submission.csv
-  metrics.py                one scoring path for every regime
-  profiling.py              profile and quality findings
-  guards.py                 plausibility check
-  prompt.py                 the system prompt
-  loop.py                   the agent loop
-  autopilot.py              deterministic pipeline, used when there is no model
-  bootstrap.py              the guarantee ladder
-  rag.py                    retrieval seam
-  recipes/
-    schema.py               vocabulary, repair, validation, model registry
-    pipeline.py             recipe -> leak-safe pipeline, cross-validated
-  tools/
-    registry.py             functions -> OpenAI tool schemas, and dispatch
-    core/                   the built-in tools
-    mods/                   experimental gateway
+requirements.txt            the provided dependency list, unmodified
+
+agent_task.py               derive paths, target, kind, metric from the task files
+agent_state.py              Clock, DataStore (data + shared folds), Ledger
+agent_session.py            the one live session every tool reads
+agent_submission.py         validation and atomic custody of submission.csv
+agent_metrics.py            one scoring path for every regime
+agent_profiling.py          profile and quality findings
+agent_guards.py             plausibility check
+agent_prompt.py             the system prompt
+agent_loop.py               the agent loop, context budgeting, spend accounting
+agent_autopilot.py          deterministic pipeline, used when there is no model
+agent_bootstrap.py          the guarantee ladder
+agent_rag.py                retrieval seam
+
+agent_recipe_schema.py      vocabulary, repair, validation, model registry
+agent_recipe_pipeline.py    recipe -> leak-safe pipeline, cross-validated
+
+agent_registry.py           functions -> OpenAI tool schemas, and dispatch
+agent_tools.py              imports the core tools, registering them
+agent_tool_context.py       get_context, set_strategy
+agent_tool_data.py          profile_data, inspect_columns
+agent_tool_modeling.py      get_recipe_schema, run_recipe, tune_recipe
+agent_tool_execution.py     run_python
+agent_tool_submit.py        evaluate_predictions, save_submission, leaderboard
+agent_mods.py               experimental gateway (discovers mod_*.py)
+mod_blend_best.py           an experimental mod: blend_top_experiments
+
+scripts/package.py          build the ZIP and verify it the way the platform runs it
+scripts/drive.py            drive the tools by hand, with no model in the loop
 tests/test_contracts.py     assertions on the guarantees above
+REPORT.md                   the 27B run: actions, cost, results, what to improve
 ```
+
+`scripts/` and `tests/` are development-only and deliberately stay out of the
+archive.
 
 ---
 

@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .state import Clock, DataStore, Ledger
-from .submission import SubmissionManager
-from .task import TaskSpec, load_task
+from agent_state import Clock, DataStore, Ledger
+from agent_submission import SubmissionManager
+from agent_task import TaskSpec, load_task
 
 
 @dataclass

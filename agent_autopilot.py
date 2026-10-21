@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .session import Session
-from .tools.core.modeling import run_recipe, tune_recipe
+from agent_session import Session
+from agent_tool_modeling import run_recipe, tune_recipe
 
 
 def _plan(session: Session) -> list[dict[str, Any]]:

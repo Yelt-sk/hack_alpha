@@ -8,8 +8,8 @@ import subprocess
 import sys
 from typing import Any
 
-from ...session import session
-from ..registry import tool
+from agent_session import session
+from agent_registry import tool
 
 #: Trimmed hard, because tool output is read by the model and every character is
 #: a token. A traceback's last lines carry the information; its middle rarely does.

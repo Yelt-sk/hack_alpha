@@ -12,9 +12,9 @@ import os
 from collections import deque
 from typing import Any
 
-from .prompt import build as build_prompt
-from .session import Session
-from .tools.registry import REGISTRY
+from agent_prompt import build as build_prompt
+from agent_session import Session
+from agent_registry import REGISTRY
 
 #: Usable context, in tokens. Overflowing it ends the run rather than degrading
 #: it, so the whole request is budgeted -- system prompt and tool schemas
@@ -23,8 +23,16 @@ from .tools.registry import REGISTRY
 #: The platform's model is not the one this was developed against, and its window
 #: is not documented, so the number is discovered rather than assumed: the server
 #: is asked, and only if it will not say does this default apply.
+#:
+#: The platform's proxy does not advertise it, so the default is what the proxy
+#: was measured to accept: a 60,057-token prompt went through, which puts the real
+#: window at 64k or more. Budgeting 14k here -- the earlier guess -- threw away
+#: three quarters of it and trimmed the experiment record the agent needs to avoid
+#: repeating itself. Half of the proven floor leaves room for a smaller endpoint
+#: and for tokenisation being worse than the estimate; an overflow still shrinks
+#: the budget and retries, so being wrong here costs a step, not the run.
 _CONTEXT_TOKENS = int(os.environ.get("AGENT_CONTEXT_TOKENS", 0))
-_CONTEXT_FALLBACK = 14000
+_CONTEXT_FALLBACK = 32000
 
 
 def discover_context(client: Any, model: str, log=print) -> int:
@@ -139,6 +147,9 @@ def run(session: Session, max_steps: int = 120, log=print) -> dict[str, Any]:
     #: Shrinks on an overflow and stays shrunk. Restoring the full budget would
     #: just overflow again a step later.
     scale = 1.0
+    #: What the run costs. The team shares one daily budget, so the price of an
+    #: attempt decides how many attempts there are; unmeasured, it gets guessed.
+    spend = {"prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
 
     for steps in range(1, max_steps + 1):
         if session.clock.must_finalize:
@@ -186,6 +197,13 @@ def run(session: Session, max_steps: int = 120, log=print) -> dict[str, Any]:
                 stopped = "error"
                 break
 
+        usage = getattr(response, "usage", None)
+        if usage:
+            spend["prompt_tokens"] += usage.prompt_tokens or 0
+            spend["completion_tokens"] += usage.completion_tokens or 0
+            # Proxies that price the call report it here; others simply do not.
+            spend["cost"] += float((usage.model_extra or {}).get("cost") or 0.0)
+
         message = response.choices[0].message
         messages.append(message.model_dump(exclude_none=True))
 
@@ -216,11 +234,16 @@ def run(session: Session, max_steps: int = 120, log=print) -> dict[str, Any]:
             stopped = "no_progress"
             break
 
+    log(f"[loop] {steps} steps, {spend['prompt_tokens']} prompt + "
+        f"{spend['completion_tokens']} completion tokens"
+        + (f", cost {spend['cost']:.2f}" if spend["cost"] else ""))
+
     return {
         "steps": steps,
         "stopped": stopped,
         "regime": session.regime,
         "experiments": len(session.ledger),
+        "spend": spend,
         "final_message": next(
             (m.get("content") for m in reversed(messages)
              if m.get("role") == "assistant" and m.get("content")),

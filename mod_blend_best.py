@@ -12,8 +12,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from ...session import session
-from ..registry import tool
+from agent_session import session
+from agent_registry import tool
 
 
 @tool(experimental=True)

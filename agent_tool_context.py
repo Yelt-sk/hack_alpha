@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from ...session import session, summary
-from ..registry import tool
+from agent_session import session, summary
+from agent_registry import tool
 
 
 @tool

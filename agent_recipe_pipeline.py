@@ -22,7 +22,7 @@ from sklearn.preprocessing import (
     MinMaxScaler, OneHotEncoder, OrdinalEncoder, RobustScaler, StandardScaler, TargetEncoder,
 )
 
-from .schema import MODELS, N_JOBS
+from agent_recipe_schema import MODELS, N_JOBS
 
 EPS = 1e-9
 
@@ -447,7 +447,7 @@ def evaluate(
     averaged over folds -- fold-averaged predictions are both a free ensemble and
     the reason a saved submission matches the score it was judged on.
     """
-    from .schema import MODELS as _MODELS  # local import keeps the module import-light
+    from agent_recipe_schema import MODELS as _MODELS  # local import keeps the module import-light
 
     spec = store.spec
     kind, transform = spec.kind, recipe["target_transform"]
