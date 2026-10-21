@@ -1,0 +1,20 @@
+# Local environment
+.venv/
+__pycache__/
+*.py[cod]
+
+# Case data: provided by the platform, not ours to redistribute
+data/
+.agent_cache/
+.test_cache/
+
+# Run artifacts
+submission.csv
+*.log
+*.parquet
+*.joblib
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
