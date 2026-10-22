@@ -36,11 +36,24 @@ def floor(session: Session, log=print) -> dict[str, Any]:
 def baseline(session: Session, log=print) -> dict[str, Any]:
     """Rung two: an untuned booster, scored on the shared folds and saved."""
     spec, store = session.spec, session.store
+    # The floor is weighted for an imbalanced classification metric, because the
+    # metric is what it has to clear. Measured on the classification task: the
+    # same booster scores 0.527 unweighted, 0.598 balanced and 0.608 with sqrt
+    # weights. Leaving the floor unweighted means the run's guaranteed minimum
+    # is a tenth of macro F1 below what the same model gives for free.
+    weighted = "sqrt" if spec.kind in ("binary", "multiclass") else "none"
     recipe, errors, _ = validate(
         {
             "name": "bootstrap_lightgbm",
             "notes": "Automatic floor, before the agent starts.",
             "drop_columns": [spec.id_column],
+            "class_weight": weighted,
+            # Thresholds go in the floor, not only within the agent's reach,
+            # because the floor is the part of the run that is guaranteed. On the
+            # classification task they are worth 0.6144 -> 0.6379 by the honest
+            # nested estimate, which is more than the whole of the previous
+            # submission earned.
+            "postprocess": {"thresholds": "per_class" if weighted != "none" else "none"},
             "model": {"type": "lightgbm", "params": {"n_estimators": 300}},
         },
         spec.kind,

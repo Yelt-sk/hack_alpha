@@ -288,11 +288,34 @@ class FlamlReg(RegressorMixin, _FlamlBase):
 # ---------------------------------------------------------------------------
 
 
-def build_estimator(recipe: dict, kind: str, time_budget_s: float | None = None):
+def _class_weights(y, scheme: str) -> dict | None:
+    """Weights for one fold's training labels.
+
+    Computed here, from the fold's own labels, because that is the only place
+    they can be computed without the validation half leaking into them.
+
+    ``balanced`` is ``n / (k * count)`` -- sklearn's own definition. ``sqrt`` is
+    its square root, which lifts the rare classes without handing them the run:
+    on the classification task it beat both ``balanced`` and no weighting at all
+    (macro F1 0.6363 against 0.5995 and 0.5402, before thresholds).
+    """
+    if y is None:
+        return None
+    counts = pd.Series(y).value_counts()
+    balanced = len(y) / (len(counts) * counts)
+    weights = np.sqrt(balanced) if scheme == "sqrt" else balanced
+    return {label: float(w) for label, w in weights.items()}
+
+
+def build_estimator(recipe: dict, kind: str, time_budget_s: float | None = None, y=None):
     model_type = recipe["model"]["type"]
     params = {**MODELS[model_type]["defaults"], **(recipe["model"].get("params") or {})}
     classification = kind != "regression"
-    balanced = recipe["class_weight"] == "balanced" and classification
+    scheme = recipe["class_weight"] if classification else "none"
+    balanced = scheme in ("balanced", "sqrt")
+    # "balanced" is a name sklearn knows; "sqrt" is ours, so it has to arrive as
+    # the explicit mapping that every sklearn-family estimator also accepts.
+    weight: Any = "balanced" if scheme == "balanced" else _class_weights(y, scheme)
 
     if model_type == "dummy":
         from sklearn.dummy import DummyClassifier, DummyRegressor
@@ -304,7 +327,7 @@ def build_estimator(recipe: dict, kind: str, time_budget_s: float | None = None)
 
     if model_type == "logreg":
         from sklearn.linear_model import LogisticRegression
-        return LogisticRegression(class_weight="balanced" if balanced else None, **params)
+        return LogisticRegression(class_weight=weight if balanced else None, **params)
 
     if model_type in ("random_forest", "extra_trees"):
         from sklearn.ensemble import (ExtraTreesClassifier, ExtraTreesRegressor,
@@ -314,20 +337,20 @@ def build_estimator(recipe: dict, kind: str, time_budget_s: float | None = None)
             ("extra_trees", True): ExtraTreesClassifier, ("extra_trees", False): ExtraTreesRegressor,
         }
         if balanced:
-            params["class_weight"] = "balanced"
+            params["class_weight"] = weight
         return table[(model_type, classification)](random_state=0, **params)
 
     if model_type == "hist_gbm":
         from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
         if balanced:
-            params["class_weight"] = "balanced"
+            params["class_weight"] = weight
         cls = HistGradientBoostingClassifier if classification else HistGradientBoostingRegressor
         return cls(random_state=0, **params)
 
     if model_type == "lightgbm":
         from lightgbm import LGBMClassifier, LGBMRegressor
         if balanced:
-            params["class_weight"] = "balanced"
+            params["class_weight"] = weight
         cls = LGBMClassifier if classification else LGBMRegressor
         return cls(random_state=0, **params)
 
@@ -339,7 +362,8 @@ def build_estimator(recipe: dict, kind: str, time_budget_s: float | None = None)
     if model_type == "catboost":
         params.setdefault("random_seed", 0)
         if balanced:
-            params["auto_class_weights"] = "Balanced"
+            # CatBoost has both schemes of its own, and prefers them to a mapping.
+            params["auto_class_weights"] = "SqrtBalanced" if scheme == "sqrt" else "Balanced"
         return (CatBoostClf if classification else CatBoostReg)(params=params)
 
     if model_type == "flaml":
@@ -355,7 +379,7 @@ def build_estimator(recipe: dict, kind: str, time_budget_s: float | None = None)
 
 
 def compile_pipeline(
-    recipe: dict, X: pd.DataFrame, kind: str, time_budget_s: float | None = None
+    recipe: dict, X: pd.DataFrame, kind: str, time_budget_s: float | None = None, y=None
 ) -> tuple[Pipeline, list[str]]:
     """Turn a validated recipe into a pipeline that is refitted per fold."""
     warnings: list[str] = []
@@ -418,7 +442,7 @@ def compile_pipeline(
         ("features", FeatureEngineer(recipe["features"])),
         ("prep", preprocess),
         ("names", SanitizeNames()),
-        ("model", build_estimator(recipe, kind, time_budget_s)),
+        ("model", build_estimator(recipe, kind, time_budget_s, y)),
     ])
     return pipeline, warnings
 
@@ -469,7 +493,9 @@ def evaluate(
 
     for fold, (train_idx, val_idx) in enumerate(store.splits()):
         started = time.perf_counter()
-        pipeline, compile_warnings = compile_pipeline(recipe, X, kind, budget_per_fold)
+        pipeline, compile_warnings = compile_pipeline(
+            recipe, X, kind, budget_per_fold, y.iloc[train_idx]
+        )
         if fold == 0:
             warnings += compile_warnings
 
@@ -497,6 +523,38 @@ def evaluate(
     else:
         test_final = np.mean(test_predictions, axis=0)
 
+    thresholds: dict[str, Any] = {}
+    wants_thresholds = (recipe.get("postprocess") or {}).get("thresholds") == "per_class"
+    if wants_thresholds and classification and oof_proba is not None and test_proba:
+        # Fitted on the out-of-fold probabilities, which is the only place a
+        # decision rule can be fitted without seeing the labels it will be judged
+        # on. The honest number comes from refitting them per fold, and both are
+        # reported: the gap between them is how much fitting the rule on the same
+        # predictions that score it flatters the result.
+        import agent_thresholds
+
+        y_index = np.searchsorted(np.asarray(classes), np.asarray(y))
+        divisors, fitted = agent_thresholds.fit(oof_proba, y_index)
+        honest = agent_thresholds.honest_score(oof_proba, y_index, store.fold_id)
+        plain = agent_thresholds._macro_f1(y_index, oof_proba.argmax(1), oof_proba.shape[1])
+
+        oof = np.asarray(classes)[agent_thresholds.apply(oof_proba, divisors)]
+        test_final = np.asarray(classes)[
+            agent_thresholds.apply(np.mean(test_proba, axis=0), divisors)
+        ]
+        thresholds = {
+            "divisors": {str(c): round(float(d), 3) for c, d in zip(classes, divisors)},
+            "macro_f1_argmax": round(plain, 6),
+            "macro_f1_fitted": round(fitted, 6),
+            "macro_f1_honest": round(honest, 6),
+            "optimism": round(fitted - honest, 6),
+            "note": (
+                "The score reported for this experiment uses the fitted rule. "
+                "macro_f1_honest is what it is worth on predictions the rule has "
+                "not seen; trust that one when comparing."
+            ),
+        }
+
     return {
         "oof": oof,
         "oof_proba": oof_proba,
@@ -505,4 +563,5 @@ def evaluate(
         "fold_seconds": fold_seconds,
         "seconds": float(sum(fold_seconds)),
         "warnings": warnings,
+        "thresholds": thresholds,
     }

@@ -21,3 +21,7 @@ submission.csv
 
 # Built archive
 submission.zip
+
+# Rehearsal runs
+runs/
+.run.env

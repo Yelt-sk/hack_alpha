@@ -20,7 +20,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from agent_metrics import is_better
+from agent_metrics import is_better, score as score_predictions
 from agent_task import TaskSpec
 
 
@@ -123,6 +123,32 @@ class SubmissionManager:
                 ),
             }
 
+        if not force and self.exists() and self.state.score is None:
+            # The file on disk carries no score, so nothing can be shown to beat
+            # it, and letting a write through anyway is how a run destroys its
+            # own best answer. Observed in a full three-hour rehearsal: the agent
+            # hand-built an ensemble worth 0.6632, saved it as a file, and the
+            # fallback pipeline then replaced it twelve times over -- ending on
+            # 0.5984, with a constant at 0.048 among the writes. The ledger
+            # called every one of them worse. The file changed every time.
+            #
+            # An unknown score is a lock, not a licence. The key is either a real
+            # score for what is already there, or an explicit force by whoever is
+            # willing to answer for it.
+            return {
+                "status": "kept_previous",
+                "reason": (
+                    "the saved submission has no validation score, so a replacement "
+                    "cannot be shown to be better"
+                ),
+                "hint": (
+                    "Score the predictions on the shared folds with evaluate_predictions "
+                    "and save that result, or pass force=true if you are certain this "
+                    "file is better."
+                ),
+                "current": self.describe(),
+            }
+
         if (
             not force
             and score is not None
@@ -147,7 +173,13 @@ class SubmissionManager:
         self.state.history.append(
             {"source": source, "score": score, "note": note[:120], "rows": len(frame)}
         )
-        return {"status": "saved", **self.describe()}
+        saved = {"status": "saved", **self.describe()}
+        if score is None:
+            saved["warning"] = (
+                "This file has no validation score, so nothing can replace it without "
+                "force=true. Score it with evaluate_predictions to let better results in."
+            )
+        return saved
 
     def _atomic_write(self, frame: pd.DataFrame) -> None:
         """Write via a temporary file in the same directory, then rename.
@@ -183,7 +215,20 @@ class SubmissionManager:
         frame = pd.DataFrame(
             {self.spec.id_column: self.test_ids, self.spec.target_column: value}
         )
-        return self.save(frame, score=None, source="constant", note="bootstrap floor", force=True)
+        # The floor carries a real score, which costs nothing to compute because
+        # nothing is fitted: one constant against the training target. Leaving it
+        # unscored would lock the file by the rule above, and the guarantee ladder
+        # would stop on its first rung with the constant still on disk -- which is
+        # exactly the failure this pair of changes was written to prevent, only
+        # worse. The two belong together and must not be separated.
+        try:
+            floor_score: float | None = float(
+                score_predictions(self.spec.metric, y_train, np.full(len(y_train), value))
+            )
+        except Exception:  # noqa: BLE001 - a floor that cannot be scored is still a floor
+            floor_score = None
+        return self.save(frame, score=floor_score, source="constant",
+                         note="bootstrap floor", force=True)
 
     def exists(self) -> bool:
         return self.spec.submission_path.is_file()

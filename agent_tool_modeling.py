@@ -65,6 +65,8 @@ def _finish(experiment: Experiment, result: dict[str, Any], warnings: list[str])
         "verdict": current.ledger.verdict(experiment),
         "time": current.clock.summary(),
     }
+    if experiment.detail.get("thresholds"):
+        payload["thresholds"] = experiment.detail["thresholds"]
     if warnings:
         payload["warnings"] = warnings
     if experiment.tainted:
@@ -233,6 +235,7 @@ def run_recipe(recipe: dict, note: str = "") -> dict[str, Any]:
         "all_metrics": report(spec.kind, store.y, result["oof"], result["oof_proba"], result["classes"]),
         "recipe": normalised,
         "fingerprint": fingerprint,
+        "thresholds": result.get("thresholds") or {},
     }
     experiment = _register(
         normalised["name"], "recipe", primary,
@@ -281,8 +284,43 @@ def tune_recipe(recipe: dict, time_budget_s: int = 600, n_trials: int = 40) -> d
         return {"status": "refused", "problem": "not enough time remains to tune",
                 "hint": "Finalise with the best recipe you already have."}
 
+    # What a single evaluation costs is already known: every experiment in the
+    # ledger timed one. Checking it here, before the probe, is the difference
+    # between saying "you will get four trials, not forty" and discovering it
+    # after a quarter of an hour. Observed twice: a request for twenty-five
+    # trials that managed two in 473 seconds and was then refused on the
+    # reserve, and a request for forty that spent seventeen minutes to gain
+    # 0.004.
+    timed = sorted(e.seconds for e in current.ledger.entries if e.seconds > 0)
+    if timed:
+        per_trial = timed[len(timed) // 2]
+        affordable = int(budget // per_trial)
+        if affordable < 3:
+            return {
+                "status": "refused",
+                "problem": (
+                    f"one evaluation of this task costs about {per_trial:.0f}s, so "
+                    f"{budget:.0f}s of budget buys {affordable} trials -- too few to "
+                    f"search anything"
+                ),
+                "hint": (
+                    "Tuning is the wrong move with this much time left. Change the "
+                    "recipe itself, or finalise what you have."
+                ),
+                "seconds_per_trial": round(per_trial, 1),
+            }
+        if affordable < n_trials:
+            notes_upfront = (
+                f"asked for {n_trials} trials; at about {per_trial:.0f}s each only "
+                f"{affordable} fit in the budget, so the search will stop there"
+            )
+        else:
+            notes_upfront = ""
+    else:
+        per_trial, affordable, notes_upfront = None, None, ""
+
     space = copy.deepcopy(space)
-    notes: list[str] = []
+    notes: list[str] = [notes_upfront] if notes_upfront else []
     probe_started = time.perf_counter()
     try:
         evaluate(normalised, store)

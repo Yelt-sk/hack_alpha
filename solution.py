@@ -82,7 +82,18 @@ def main() -> int:
             session.submissions.save_constant(session.store.y)
         log(f"[solution] final: {session.submissions.describe()}")
 
-    signal.signal(signal.SIGTERM, lambda *_: (finalise(), sys.exit(0)))
+    def _stop(name: str):
+        def handler(*_: object) -> None:
+            log(f"[solution] {name}: finalising the best result so far")
+            finalise()
+            sys.exit(0)
+        return handler
+
+    # SIGTERM is what the platform sends at three hours. SIGINT is Ctrl+C, which
+    # only happens when a person is watching a rehearsal -- it writes the answer
+    # out the same way rather than leaving a half-written file behind.
+    signal.signal(signal.SIGTERM, _stop("SIGTERM"))
+    signal.signal(signal.SIGINT, _stop("interrupted"))
     threading.Thread(target=_watchdog, args=(session, log), daemon=True).start()
 
     try:

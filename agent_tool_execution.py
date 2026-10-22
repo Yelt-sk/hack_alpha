@@ -20,17 +20,40 @@ _MAX_STREAM = 6000
 def run_python(code: str, timeout_s: int = 900) -> dict[str, Any]:
     """Execute Python in a fresh subprocess and return stdout, stderr and the exit code.
 
-    Each call is a new process: files persist, variables do not. The working
+    **Each call is a new process: files persist, variables do not.** Anything you
+    want in the next call must be written to `CACHE_DIR` first. The working
     directory is the task directory.
 
-    The data is already available as parquet, which is far faster to read than the
-    CSVs and carries settled dtypes. These environment variables point at it:
-    `TRAIN_PARQUET`, `TEST_PARQUET`, `FOLDS_CSV`, `CACHE_DIR`. `FOLDS_CSV` holds
-    the run's fold assignment -- use it, and your result stays comparable with
-    every other experiment.
+    Use `n_jobs=4`, not `-1`: the container has 8 cores and oversubscribing them
+    across folds measured 21x slower for an identical score.
 
-    To get a hand-written model onto the leaderboard, write out-of-fold and test
-    predictions and pass them to `evaluate_predictions`.
+    A working start, with the paths and the run's own folds already wired up:
+
+        import os, numpy as np, pandas as pd
+        from sklearn.metrics import f1_score
+
+        cache = os.environ["CACHE_DIR"]
+        train = pd.read_parquet(os.environ["TRAIN_PARQUET"])
+        test  = pd.read_parquet(os.environ["TEST_PARQUET"])
+        folds = pd.read_csv(os.environ["FOLDS_CSV"])          # id,fold
+        df    = train.merge(folds, on="id")
+
+        oof = np.zeros((len(df), n_classes))
+        for f in sorted(df["fold"].unique()):
+            tr, va = df[df["fold"] != f], df[df["fold"] == f]
+            model.fit(tr[features], tr[target])
+            oof[va.index] = model.predict_proba(va[features])
+
+        np.save(f"{cache}/oof_mine.npy", oof)       # or your result is lost
+        np.save(f"{cache}/testP_mine.npy", test_probabilities)
+
+    Always use `FOLDS_CSV`. A result scored on any other split is not comparable
+    with anything else in the run, and cannot be judged against the leaderboard.
+
+    To put a hand-written model on the leaderboard, save out-of-fold and test
+    predictions as above and pass them to `evaluate_predictions`. A model that
+    never reaches the ledger cannot be compared, cannot be blended, and cannot
+    defend the submission it produced.
 
     Args:
         code: The program to run.

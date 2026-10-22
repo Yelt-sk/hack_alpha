@@ -144,6 +144,9 @@ def run(session: Session, max_steps: int = 120, log=print) -> dict[str, Any]:
     #: than trusted to the model: from inside the loop, a refusal it ignores
     #: looks exactly like one it acts on.
     recent: deque[bool] = deque(maxlen=_BARREN_WINDOW)
+    #: Asked once, never twice: a second push would be nagging, and the model
+    #: has already answered the question.
+    pushed_back = False
     #: Shrinks on an overflow and stays shrunk. Restoring the full budget would
     #: just overflow again a step later.
     scale = 1.0
@@ -210,6 +213,30 @@ def run(session: Session, max_steps: int = 120, log=print) -> dict[str, Any]:
         if message.content:
             log(f"\n--- step {steps} ---\n{message.content[:1500]}")
         if not message.tool_calls:
+            # Stopping because the obvious moves ran out is not the same as
+            # stopping because the time ran out. Observed in a full run: the
+            # agent finished at 143 minutes of 180, having just written down
+            # three things it would try with more time. Handing that list back
+            # once costs one step and can buy a quarter of the budget.
+            idle_minutes = session.clock.usable_remaining / 60
+            if idle_minutes > _PUSHBACK_MINUTES and not pushed_back:
+                pushed_back = True
+                log(f"[loop] the agent stopped with {idle_minutes:.0f} min left; asking once")
+                messages.append({
+                    "role": "user",
+                    "content": json.dumps({
+                        "minutes_left": round(idle_minutes, 1),
+                        "note": (
+                            "You stopped, but the run has not. If you named anything "
+                            "you would try with more time, this is that time."
+                        ),
+                        "instruction": (
+                            "Either run the next experiment now, or reply again with "
+                            "nothing to call and the run will finalise."
+                        ),
+                    }, ensure_ascii=False),
+                })
+                continue
             log("[loop] the agent finished")
             stopped = "finished"
             break

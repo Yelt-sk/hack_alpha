@@ -109,9 +109,21 @@ MODELS: dict[str, dict[str, Any]] = {
     },
     "lightgbm": {
         "tasks": ["regression", "binary", "multiclass"],
+        # num_leaves and min_child_samples are here because the stock values lose
+        # real score: on the classification task the agent reached 0.6519 by hand
+        # with 63 leaves where the default 31 gave 0.5649, and it got there in
+        # twenty minutes it could have spent on something it could not derive.
+        # A default should not be weaker than what the first tuning run finds.
+        #
+        # subsample is deliberately absent: LightGBM ignores it unless
+        # subsample_freq is also set, so carrying it would only look like
+        # regularisation while doing nothing.
         "defaults": {
             "n_estimators": 500,
             "learning_rate": 0.05,
+            "num_leaves": 63,
+            "min_child_samples": 20,
+            "colsample_bytree": 0.8,
             "n_jobs": N_JOBS,
             "verbose": -1,
             "importance_type": "gain",
@@ -177,6 +189,7 @@ DEFAULT_RECIPE: dict[str, Any] = {
     "categorical": {"impute": "most_frequent", "encode": "native", "rare_threshold": 0.0},
     "target_transform": "none",
     "class_weight": "none",
+    "postprocess": {"thresholds": "none"},
     "model": {"type": "lightgbm", "params": {}},
     "time_budget_s": None,
 }
@@ -306,9 +319,23 @@ def validate(
     elif merged["target_transform"] == "log1p" and kind != "regression":
         fail("target_transform", "log1p only applies to regression", 'Use "none".')
 
-    if merged["class_weight"] not in ("none", "balanced"):
-        fail("class_weight", f"'{merged['class_weight']}' is not valid", 'Use "none" or "balanced".')
-    elif merged["class_weight"] == "balanced" and kind == "regression":
+    post = merged.get("postprocess") or {}
+    if not isinstance(post, dict):
+        fail("postprocess", "must be an object", 'Use {"thresholds": "per_class"}.')
+    elif set(post) - {"thresholds"}:
+        fail("postprocess", f"unknown keys {sorted(set(post) - {'thresholds'})}",
+             'The only key is "thresholds".')
+    elif post.get("thresholds", "none") not in ("none", "per_class"):
+        fail("postprocess.thresholds", f"'{post.get('thresholds')}' is not valid",
+             'Use "per_class" or "none".')
+    elif post.get("thresholds") == "per_class" and kind == "regression":
+        fail("postprocess.thresholds", "decision thresholds need classes",
+             'Use "none" for regression.')
+
+    if merged["class_weight"] not in ("none", "balanced", "sqrt"):
+        fail("class_weight", f"'{merged['class_weight']}' is not valid",
+             'Use "none", "balanced", or "sqrt".')
+    elif merged["class_weight"] != "none" and kind == "regression":
         fail("class_weight", "class_weight is meaningless for regression", 'Use "none".')
 
     if not isinstance(merged["drop_columns"], list):
@@ -398,7 +425,8 @@ def describe() -> dict[str, Any]:
             "categorical": {"impute": CAT_IMPUTE, "encode": CAT_ENCODE,
                             "rare_threshold": "fraction below which categories merge into __RARE__"},
             "target_transform": TARGET_TRANSFORM,
-            "class_weight": ["none", "balanced"],
+            "class_weight": ["none", "balanced", "sqrt"],
+            "postprocess": {"thresholds": ["none", "per_class"]},
             "model": {"type": sorted(MODELS), "params": "model-specific overrides"},
             "time_budget_s": "Seconds granted to an AutoML model such as flaml.",
         },

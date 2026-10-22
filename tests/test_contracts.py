@@ -344,6 +344,51 @@ if HAVE_DATA:
         )
         spec.submission_path.unlink(missing_ok=True)
 
+    @check("the floor is scored, so the ladder can climb past it")
+    def _():
+        # The regression this prevents: a floor written with no score, once an
+        # unknown score started locking the file, stopped the ladder on its first
+        # rung -- the constant stayed on disk and every real model was refused.
+        # A floor nothing can beat is not a floor.
+        spec, manager = _manager()
+        y = pd.read_csv(spec.files["train"], usecols=[spec.target_column])[spec.target_column]
+        floor = manager.save_constant(y)
+        assert floor["validation_score"] is not None, (
+            "the floor has no score, so nothing can be shown to beat it"
+        )
+        better = 0.9 if spec.direction == "maximize" else floor["validation_score"] / 2
+        assert manager.save(_good(spec, manager), score=better,
+                            source="model")["status"] == "saved", "the ladder cannot climb"
+        spec.submission_path.unlink(missing_ok=True)
+
+    @check("an unscored submission cannot be silently overwritten")
+    def _():
+        # Observed in a full three-hour run: the agent hand-built an ensemble
+        # worth 0.6632 and saved it as a file, which left the recorded score
+        # unknown. The fallback pipeline then ran out the clock with ordinary
+        # recipes, and every one of them -- including a constant at 0.048 --
+        # replaced it, because an unknown score switched the comparison off.
+        # The run earned 0.6632 and would have submitted 0.5984.
+        spec, manager = _manager()
+        manager.save(_good(spec, manager), score=None, source="hand_built")
+        result = manager.save(_good(spec, manager), score=0.10, source="fallback")
+        assert result["status"] == "kept_previous", (
+            "a scored result replaced an unscored one; nothing established it was "
+            "better, and the run's best answer is what gets destroyed"
+        )
+        assert "evaluate_predictions" in result.get("hint", ""), result
+        spec.submission_path.unlink(missing_ok=True)
+
+    @check("an unscored submission can still be replaced deliberately")
+    def _():
+        # The lock must not become a trap: whoever knows better can still act.
+        spec, manager = _manager()
+        manager.save(_good(spec, manager), score=None, source="hand_built")
+        result = manager.save(_good(spec, manager), score=0.9, source="better", force=True)
+        assert result["status"] == "saved", result
+        assert manager.state.score == 0.9
+        spec.submission_path.unlink(missing_ok=True)
+
     @check("the constant floor produces a file that validates")
     def _():
         spec, manager = _manager()
